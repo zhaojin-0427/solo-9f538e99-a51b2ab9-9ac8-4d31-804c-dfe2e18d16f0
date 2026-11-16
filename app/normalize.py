@@ -1,7 +1,8 @@
-"""变异解析、校验、左对齐标准化与等价归并。
+"""变异解析、校验、左对齐标准化、等价归并与单倍型合成。
 
 纯函数模块：不依赖 Flask / SQLite，便于单独测试。
 所有非法输入抛出 ValidationError，消息面向用户展示；调用方保证整批失败。
+变异组合冲突抛出 HaplotypeConflictError（ValidationError 子类），整次拒绝。
 """
 from __future__ import annotations
 
@@ -231,3 +232,116 @@ def compute_report(fasta_text: str, csv_text: str) -> dict:
         "rows": out_rows,
         "vcf": render_vcf(chrom, len(seq), ordered),
     }
+
+
+# ---------------------------------------------------------------- 单倍型合成
+
+class HaplotypeConflictError(ValidationError):
+    """所选变异组合在参考坐标上冲突；携带全部涉及源 ID（去重排序）。"""
+
+    def __init__(self, conflicts):
+        self.conflicts = list(conflicts)
+        self.ids = sorted({i for c in self.conflicts for i in c["ids"]})
+        detail = "；".join(c["message"] for c in self.conflicts)
+        super().__init__(
+            f"变异组合冲突，整次拒绝（涉及源 ID：{', '.join(self.ids)}）：{detail}"
+        )
+
+
+def _group_edit(g):
+    """标准记录 → 参考坐标编辑 (start, end, replacement)。
+
+    0 基半开区间 [start, end)：SNV 替换一个碱基；DEL 删除锚点右侧片段；
+    INS 为零宽编辑（start == end == 锚定碱基的 1 基 POS，即插到锚点右侧）。
+    """
+    kind, pos, ref, alt = g["kind"], g["pos"], g["ref"], g["alt"]
+    if kind == SNV:
+        return (pos - 1, pos, alt)
+    if kind == INS:
+        return (pos, pos, alt[1:])
+    return (pos, pos + len(ref) - 1, "")  # DEL
+
+
+def _describe(g):
+    ids = "、".join(g["ids"])
+    kind, pos, ref, alt = g["kind"], g["pos"], g["ref"], g["alt"]
+    if kind == SNV:
+        return f"单碱基替换（源 ID：{ids}；POS {pos}：{ref}→{alt}）"
+    if kind == INS:
+        return f"插入（源 ID：{ids}；POS {pos} 锚定碱基后插入 {alt[1:]}）"
+    return (f"缺失（源 ID：{ids}；POS {pos}：{ref}→{alt}，"
+            f"删除第 {pos + 1}–{pos + len(ref) - 1} 碱基）")
+
+
+def _pair_conflict(g1, g2):
+    """两条标准记录是否冲突；返回冲突描述 dict 或 None。
+
+    规则（全部按原参考坐标判定）：
+    - 替换/缺失的碱基区间不得重叠（被删除的碱基不能再被改动）；
+    - 插入锚点碱基不得落在另一缺失删除的碱基中；
+    - 不同插入不得占同一断点；
+    - 共享 VCF 锚点但实际编辑不冲突（插入/替换与缺失同锚点等）可共存，
+      首尾相接的缺失同样可共存（删除区间并集确定）。
+    """
+    e1, e2 = _group_edit(g1), _group_edit(g2)
+
+    def clash(reason):
+        return {"message": f"{_describe(g1)} 与 {_describe(g2)}：{reason}",
+                "ids": sorted(set(g1["ids"]) | set(g2["ids"]))}
+
+    # 替换/缺失的碱基足迹（插入为零宽编辑，无足迹）
+    f1 = e1 if e1[0] != e1[1] else None
+    f2 = e2 if e2[0] != e2[1] else None
+    if f1 and f2 and f1[0] < f2[1] and f2[0] < f1[1]:
+        return clash("被删除/替换的碱基被再次改动")
+    # 插入锚点落在被删碱基上：0 基插入位置 q（锚定碱基的 1 基 POS 即 q），
+    # 缺失区间 [s,e) 删除 1 基碱基 s+1..e，锚点被删 ⟺ s < q ≤ e
+    for gi, ei, gj, ej in ((g1, e1, g2, e2), (g2, e2, g1, e1)):
+        if gi["kind"] == INS and gj["kind"] == DEL and ej[0] < ei[0] <= ej[1]:
+            return clash("插入锚点碱基被另一缺失删除")
+    if g1["kind"] == g2["kind"] == INS and e1[0] == e2[0]:
+        return clash("不同插入占同一断点")
+    return None
+
+
+def synthesize_haplotype(seq, payload, selected_ids):
+    """把所选源 ID 对应的标准记录按原参考坐标组合到参考序列上。
+
+    - 映射到同一标准位点（归并组）的源 ID 只应用一次；
+    - 全部编辑按参考坐标同时组合（替换与插缺互不位移）；
+    - 任一冲突 → HaplotypeConflictError（整次拒绝，消息列出涉及源 ID）。
+    返回单倍型完整序列。
+    """
+    ids = list(dict.fromkeys(selected_ids))  # 去重保序
+    if not ids:
+        raise ValidationError("未选择任何源 ID")
+    rows_by_id = {r["id"]: r for r in payload["rows"]}
+    unknown = [i for i in ids if i not in rows_by_id]
+    if unknown:
+        raise ValidationError("报告中不存在源 ID: " + ", ".join(unknown))
+
+    groups = payload["groups"]
+    chosen = {}  # 归并组序号 -> 标准记录（同组只应用一次）
+    for i in ids:
+        gi = rows_by_id[i]["group"]
+        chosen.setdefault(gi, groups[gi])
+    selected = [chosen[k] for k in sorted(chosen)]
+
+    conflicts = []
+    for a in range(len(selected)):
+        for b in range(a + 1, len(selected)):
+            c = _pair_conflict(selected[a], selected[b])
+            if c:
+                conflicts.append(c)
+    if conflicts:
+        raise HaplotypeConflictError(conflicts)
+
+    # 同一断点处：零宽插入排在同起点编辑之前（先插后删/替），结果唯一确定
+    edits = sorted((_group_edit(g) for g in selected), key=lambda e: (e[0], e[1]))
+    out, cur = [], 0
+    for s, e, rep in edits:
+        out.append(seq[cur:s])
+        out.append(rep)
+        cur = e
+    out.append(seq[cur:])
+    return "".join(out)

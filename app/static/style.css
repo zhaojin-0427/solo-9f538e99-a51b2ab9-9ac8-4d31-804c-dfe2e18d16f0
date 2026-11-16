@@ -43,4 +43,11 @@ pre.vcf {
   background: #0f172a; color: #d7e3f4; padding: .8rem 1rem; border-radius: 6px;
   overflow-x: auto; font-size: .85rem;
 }
+pre.fasta {
+  background: #f8fafc; border: 1px solid #dde3e8; color: #222;
+  padding: .8rem 1rem; border-radius: 6px; overflow-x: auto;
+  font-family: ui-monospace, Consolas, monospace; font-size: .85rem;
+  white-space: pre-wrap; word-break: break-all;
+}
+td.pick { text-align: center; }
 code { background: #eef2f6; border-radius: 3px; padding: 0 .3rem; }

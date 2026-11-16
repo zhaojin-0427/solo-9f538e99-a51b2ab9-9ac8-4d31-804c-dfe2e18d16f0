@@ -80,6 +80,33 @@
 </section>
 
 <section class="card">
+  <h3>单倍型</h3>
+  {% if haplotypes %}
+  <table>
+    <tr><th>单倍型</th><th>依据报告</th><th>版本 (FASTA/CSV)</th><th>所选源 ID</th><th>状态</th><th>长度</th><th>生成时间 (UTC)</th><th>结论</th></tr>
+    {% for h in haplotypes %}
+    <tr>
+      <td><a href="{{ url_for('main.haplotype_detail', bid=batch.id, hid=h.id) }}">#{{ h.id }}</a></td>
+      <td><a href="{{ url_for('main.report_detail', bid=batch.id, rid=h.report_id) }}">#{{ h.report_id }}</a></td>
+      <td>v{{ h.fasta_version }} / v{{ h.csv_version }}</td>
+      <td>{{ h.ids|join(', ') }}</td>
+      <td>{{ '成功' if h.status == 'ok' else '失败' }}</td>
+      <td>{{ h.seq_length if h.seq_length is not none else '—' }}</td>
+      <td>{{ h.created_at }}</td>
+      <td>
+        {% if h.status != 'ok' %}<span class="badge bad">失败</span>
+        {% elif h.fasta_version == fv and h.csv_version == cv %}<span class="badge ok">当前</span>
+        {% else %}<span class="badge old">已过期</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="hint">尚无单倍型；请在当前成功报告页勾选源 ID 合成。</p>
+  {% endif %}
+</section>
+
+<section class="card">
   <h3>计算任务</h3>
   <table>
     <tr><th>任务</th><th>版本 (FASTA/CSV)</th><th>状态</th><th>创建</th><th>完成</th></tr>

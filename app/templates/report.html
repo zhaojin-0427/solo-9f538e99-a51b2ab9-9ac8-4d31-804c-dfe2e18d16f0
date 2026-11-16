@@ -39,10 +39,20 @@
 
 <section class="card">
   <h3>源行 → 标准化对照（{{ payload.rows|length }} 行）</h3>
+  {% if is_current %}
+  <form method="post" action="{{ url_for('main.create_haplotype', bid=batch.id, rid=report.id) }}">
+  <p class="hint">
+    勾选源 ID 合成一条单倍型 FASTA：映射到同一标准位点（归并组）的记录只应用一次；
+    组合按原参考坐标同时应用——共享 VCF 锚点但实际编辑不冲突的事件可共存；
+    被删除的碱基不能再被改动或用作插入锚点；不同插入不能占同一断点。
+    发现冲突将整次拒绝并列出涉及的源 ID。
+  </p>
+  {% endif %}
   <table>
-    <tr><th>源 ID</th><th>文件行</th><th>原始 POS/REF/ALT</th><th>类型</th><th>标准化 POS/REF/ALT</th><th>归并组</th></tr>
+    <tr>{% if is_current %}<th>选</th>{% endif %}<th>源 ID</th><th>文件行</th><th>原始 POS/REF/ALT</th><th>类型</th><th>标准化 POS/REF/ALT</th><th>归并组</th></tr>
     {% for r in payload.rows %}
     <tr>
+      {% if is_current %}<td class="pick"><input type="checkbox" name="ids" value="{{ r.id }}"></td>{% endif %}
       <td>{{ r.id }}</td><td>{{ r.line }}</td>
       <td class="seq">{{ r.pos }} / {{ r.ref }} / {{ r.alt }}</td>
       <td>{{ r.kind_label }}</td>
@@ -51,6 +61,37 @@
     </tr>
     {% endfor %}
   </table>
+  {% if is_current %}
+  <button type="submit">合成单倍型 FASTA</button>
+  </form>
+  {% else %}
+  <p class="hint">单倍型合成仅对当前结论开放；本报告已过期，仅供查阅。</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h3>本报告的单倍型（{{ haplotypes|length }} 条）</h3>
+  {% if haplotypes %}
+  <table>
+    <tr><th>单倍型</th><th>所选源 ID</th><th>状态</th><th>长度</th><th>生成时间 (UTC)</th><th>结论</th></tr>
+    {% for h in haplotypes %}
+    <tr>
+      <td><a href="{{ url_for('main.haplotype_detail', bid=batch.id, hid=h.id) }}">#{{ h.id }}</a></td>
+      <td>{{ h.ids|join(', ') }}</td>
+      <td>{{ '成功' if h.status == 'ok' else '失败' }}</td>
+      <td>{{ h.seq_length if h.seq_length is not none else '—' }}</td>
+      <td>{{ h.created_at }}</td>
+      <td>
+        {% if h.status != 'ok' %}<span class="badge bad">失败</span>
+        {% elif is_current %}<span class="badge ok">当前</span>
+        {% else %}<span class="badge old">已过期</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="hint">尚未基于本报告合成单倍型。</p>
+  {% endif %}
 </section>
 
 <section class="card">

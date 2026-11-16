@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}单倍型 #{{ hap.id }} · 批次 #{{ batch.id }}{% endblock %}
+{% block content %}
+<h2>单倍型 #{{ hap.id }}（批次 #{{ batch.id }}：{{ batch.name }}）</h2>
+<p>
+  依据报告 <a href="{{ url_for('main.report_detail', bid=batch.id, rid=hap.report_id) }}">#{{ hap.report_id }}</a>
+  （固定输入版本 FASTA v{{ hap.fasta_version }} / CSV v{{ hap.csv_version }}）｜
+  生成于 {{ hap.created_at }} UTC
+  {% if hap.status == 'ok' %}
+    {% if is_current %}<span class="badge ok">当前</span>
+    {% else %}<span class="badge old">已过期 · 当前版本为 FASTA v{{ fv }} / CSV v{{ cv }}，本结果不再是当前结论</span>{% endif %}
+  {% else %}
+    <span class="badge bad">失败</span>
+  {% endif %}
+</p>
+<p><a href="{{ url_for('main.batch_detail', bid=batch.id) }}">← 返回批次</a></p>
+
+<section class="card">
+  <h3>所选源 ID（{{ selected_ids|length }} 个）</h3>
+  <p>{{ selected_ids|join(', ') }}</p>
+  <p class="hint">映射到同一标准位点的记录只应用一次；全部编辑按原参考坐标同时组合。</p>
+</section>
+
+{% if hap.status == 'failed' %}
+<section class="card">
+  <h3>失败原因</h3>
+  <p class="error">{{ hap.error }}</p>
+  <p class="hint">发现冲突即整次拒绝，未保留任何部分序列。</p>
+</section>
+{% else %}
+<section class="card">
+  <h3>单倍型序列（{{ hap.seq_length }} bp，基于参考 {{ hap.chrom }}）</h3>
+  <pre class="fasta">{{ fasta_text }}</pre>
+  <p><a href="{{ url_for('main.haplotype_fasta', bid=batch.id, hid=hap.id) }}">下载单倍型 FASTA</a></p>
+</section>
+{% endif %}
+{% endblock %}

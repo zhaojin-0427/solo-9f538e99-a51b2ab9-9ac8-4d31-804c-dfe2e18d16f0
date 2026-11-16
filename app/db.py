@@ -53,6 +53,25 @@ CREATE TABLE IF NOT EXISTS reports (
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, id);
 CREATE INDEX IF NOT EXISTS idx_reports_batch ON reports(batch_id, id);
+
+-- 单倍型合成：每次勾选生成一条完整记录；冲突整次拒绝，失败不留部分序列
+CREATE TABLE IF NOT EXISTS haplotypes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id        INTEGER NOT NULL REFERENCES batches(id),
+    report_id       INTEGER NOT NULL REFERENCES reports(id),
+    fasta_version   INTEGER NOT NULL,   -- 依据报告的固定输入版本（是否"当前"由此派生）
+    csv_version     INTEGER NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN ('ok', 'failed')),
+    selected_ids    TEXT NOT NULL,      -- JSON 数组：勾选的源 ID（去重排序）
+    error           TEXT,               -- failed 时的冲突说明（含涉及源 ID）
+    chrom           TEXT NOT NULL,
+    seq_length      INTEGER,            -- ok 时为全长；failed 为 NULL
+    sequence        TEXT,               -- ok 时为完整序列；failed 为 NULL（不留部分序列）
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_haplotypes_batch ON haplotypes(batch_id, id);
+CREATE INDEX IF NOT EXISTS idx_haplotypes_report ON haplotypes(report_id, id);
 """
 
 
